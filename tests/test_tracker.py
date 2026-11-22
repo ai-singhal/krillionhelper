@@ -125,3 +125,13 @@ def test_hearts_prefix_is_stripped_from_the_answer_box():
 
     assert cleanGuessText("·2 turnstile") == "turnstile" and cleanGuessText("÷2 tack") == "tack"
     assert cleanGuessText("1243") == "1243"
+
+
+def test_last_rounds_verdict_still_on_screen_is_not_credited_to_the_new_prompt(tmp_path):
+    t = start(tmp_path)
+    t.observe(frame(extra=[L('"racing pigeon": no echo. keep going', 14, 500, 300)]), 787, [PROMPT])
+    t.startRound("Name a country larger than one million square kilometres")
+    stale = frame(extra=[L('"racing pigeon": no echo. keep going', 14, 500, 300)])
+    for _ in range(4):
+        assert t.observe(stale, 787, [])["labels"] == []
+    assert t.feedbackFor("Name a country larger than one million square kilometres") == {"accepted": [], "rejected": []}

@@ -115,6 +115,8 @@ class GameTracker:
         self._resetRoundMemory()
 
     def _resetRoundMemory(self):
+        # Verdict lines from the last round can still be on screen when the next prompt appears.
+        self.staleVerdicts = getattr(self, "verdictsSeen", set()) | getattr(self, "staleVerdicts", set())
         self.baseline = set()
         self.observationCount = 0
         self.previousTexts = set()
@@ -243,7 +245,10 @@ class GameTracker:
         answer = cleanGuessText(match.group("answer"))
         message = match.group("message").strip()
         key = normalizeGuess(answer)
-        if not key or key in self.verdictsSeen:
+        if not key or key in self.verdictsSeen or key in self.staleVerdicts:
+            return
+        if self.observationCount < BASELINE_OBSERVATIONS:
+            self.staleVerdicts.add(key)  # already on screen when the round started: last round's
             return
         self.verdictsSeen.add(key)
         if ACCEPTED_MESSAGE.search(message):

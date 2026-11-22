@@ -280,7 +280,7 @@ class TriviaApp:
                         if rules and not failedRules(answer, rules):
                             pValid = max(pValid, 0.5)  # letter rules are checked locally; Jev misreads them
                         info[answer]["jev"] = (pValid, rarity)
-                        if pValid < dropBelow and info[answer]["source"] != "bank" and answer in answers:
+                        if pValid < dropBelow and answer in answers:  # proven answers too: stored data can be wrong
                             answers.remove(answer)  # clearly wrong: better a shorter list than junk
                             dropped.append(answer)
                     answers.sort(key=sortKey)
@@ -364,7 +364,10 @@ class TriviaApp:
             data = json.dumps(self.state)
         self.publish(data)
         if answers:  # narrow categories can legitimately have fewer than answerCount
-            self.cache.put(key, prompt, answers, self.cfg["model"])
+            try:
+                self.cache.put(key, prompt, answers, self.cfg["model"])
+            except Exception as e:  # a cache problem must never stop tracking and logging
+                print(f"[cache] write failed: {e}", flush=True)
             if dropped:
                 print(f"[jev] dropped as clearly wrong: {dropped}", flush=True)
             self.tracker.recordCandidates(prompt, [
