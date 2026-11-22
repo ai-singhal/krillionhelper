@@ -377,6 +377,10 @@ class GameTracker:
                 self._insertAttempt(player, self._complete(text, ownAnswers), "abandoned", now)
 
     def _insertAcceptance(self, player, answer, tier, now):
+        if self.db.execute(
+            "SELECT 1 FROM acceptances WHERE roundId = ? AND normalized = ?", (self.roundId, normalizeGuess(answer))
+        ).fetchone():
+            return  # one answer, one acceptance (the badge can be read more than once)
         self.db.execute(
             "INSERT INTO acceptances (roundId, prompt, player, answer, normalized, tier, points, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (self.roundId, self.prompt, player, answer, normalizeGuess(answer), tier,
