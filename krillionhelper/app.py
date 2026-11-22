@@ -26,6 +26,7 @@ GAME_DB_PATH = PROJECT_DIR / "game.sqlite3"
 TRACK_INTERVAL_SECONDS = 0.3
 # Rewrite the learned checker rules after this many new labels (verdicts and attempts).
 DISTILL_EVERY_LABELS = 5
+DISTILL_MIN_SECONDS = 600  # at most one rules rewrite (an Opus call) every 10 minutes
 LATENCY_LOG = PROJECT_DIR / "latency.log"
 KEEP_WARM_SECONDS = 30
 
@@ -534,12 +535,14 @@ class TriviaApp:
 
     def _distillLoop(self):
         """Every few new labels, have Claude rewrite the checker rules from all the evidence so far."""
+        lastRun = 0.0
         while not self.stopEvent.wait(20):
             try:
                 count = self.tracker.labelCount()
                 _, basedOn = self.tracker.latestInsights()
-                if count - basedOn < DISTILL_EVERY_LABELS:
+                if abs(count - basedOn) < DISTILL_EVERY_LABELS or time.time() - lastRun < DISTILL_MIN_SECONDS:
                     continue
+                lastRun = time.time()
                 rules = distillRules(self.client, self.cfg["learnModel"], *self.tracker.distillExamples())
                 if rules:
                     self.tracker.saveInsights(rules, count)

@@ -31,9 +31,9 @@ DEFAULTS = {
     # Rerank answers with TypeSafe's Jev decision model (needs TYPESAFE_API_KEY): rarest answers
     # the checker likely accepts go first. Validity AUC 0.90 against judged answers (2026-11-22).
     "rerank": True,
-    # Answers Jev thinks the checker would almost surely reject are dropped, so the list can be
-    # shorter than answerCount. Unsure ones (up to ~0.5) stay but sink to the bottom.
-    "dropBelowValidity": 0.3,
+    # Only near-certain junk is dropped (Jev is weak on franchise characters, so a higher cut
+    # loses real answers); unsure ones (validity under ~0.55) stay but sink to the bottom.
+    "dropBelowValidity": 0.1,
     "jevModel": "jev-latest",
     # Writes the learned checker rules from accumulated verdicts (in the background, not per prompt).
     "learnModel": "claude-opus-5-5",

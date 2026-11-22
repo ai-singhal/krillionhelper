@@ -235,15 +235,23 @@ class GameTracker:
                 self.turnTyped, self.turnAbandoned, self.myTurnCopies = [], [], []
                 self.typedColor, self.typedFirstColor = {}, {}
                 self.currentUp = upNow
-            for text in texts.values():
-                if text.lower() in self.baseline or len(re.sub(r"[^A-Za-z]", "", text)) < 2:
-                    continue
+            ownKeys = {normalizeGuess(a) for a in ownAnswers}
+            fresh = [
+                text for text in texts.values()
+                if text.lower() not in self.baseline and len(re.sub(r"[^A-Za-z]", "", text)) >= 2
+                and text.lower() not in self.previousTexts and normalizeGuess(text) not in ownKeys
+            ]
+            self.previousTexts = set(texts)
+            if len(fresh) > 2:  # several new lines at once: a screen change or this app's page, not typing
+                fresh = []
+            for text in fresh:
                 if colors.get(text.lower()):
                     self.typedColor[text.lower()] = colors[text.lower()]
                     self.typedFirstColor.setdefault(text.lower(), colors[text.lower()])
                 if not self.turnTyped or self.turnTyped[-1].lower() != text.lower():
                     previous = self.turnTyped[-1] if self.turnTyped else None
-                    if previous and len(normalizeGuess(previous)) >= 4 and not isContinuation(previous, text):
+                    if (previous and len(normalizeGuess(previous)) >= 4 and not isContinuation(previous, text)
+                            and len(self.turnAbandoned) < 5):
                         self.turnAbandoned.append(previous)
                     self.turnTyped = (self.turnTyped + [text])[-30:]
             self.db.commit()
@@ -507,10 +515,11 @@ class GameTracker:
         return [answer for normalized, (answer, verdict) in latest.items() if verdict == "accepted" and normalized not in others]
 
     def labelCount(self):
+        """Real verdicts only: your answers' outcomes and accepted answers with tiers."""
         with self.lock:
             feedback = self.db.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
-            attempts = self.db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
-        return feedback + attempts
+            accepted = self.db.execute("SELECT COUNT(*) FROM acceptances").fetchone()[0]
+        return feedback + accepted
 
     def distillExamples(self):
         """Everything the rules writer learns from: verdicts on your answers and other players' attempts."""
@@ -653,7 +662,7 @@ def looksLikeGuess(text, line, frameHeight, ignoreBottom):
         return False
     if len(text) > MAX_GUESS_CHARS or len(text.split()) > MAX_GUESS_WORDS:
         return False
-    if IS_UP.search(text) or IS_UP_FUZZY.search(text) or FLOATING.search(text) or UI_TEXT.match(text):
+    if IS_UP.search(text) or IS_UP_FUZZY.search(text) or FLOATING.search(text) or UI_TEXT.match(text) or TIER.search(text.upper()):
         return False
     if re.match(r"^\d{1,2}\s+\S", text):
         return False  # a numbered list line (this app's own page)
