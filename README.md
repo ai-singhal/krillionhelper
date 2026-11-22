@@ -50,7 +50,7 @@ Everything is stored in `game.sqlite3`:
 
 ## Ranking
 
-Claude lists 40 candidates rarest-first. TypeSafe's Jev decision model then scores each one, about 70ms per batch: how likely the checker accepts it (validity AUC 0.90 against judged answers) and how rare it is (0–4). Answers are sorted rarest-first among those likely valid. Clear junk (validity under 0.2) is dropped, unsure answers go to the bottom, and very common ones sink below the visible 30. Answers that other players often say, and rarity bands that keep coming back "already said", get pushed down. Synonyms of a played guess are hidden too, because the game auto-corrects typos and synonyms.
+Claude lists 40 candidates rarest-first. TypeSafe's Jev decision model then scores each one, about 70ms per batch: how likely the checker accepts it (validity AUC 0.90 against judged answers) and how rare it is (0–4). Rarity also blends in word frequency (`wordfreq`): how often the answer turns up in written text, which is how Krillion's own familiarity database scores many prompts. Answers are sorted rarest-first among those likely valid, and near-spellings of the same answer are merged. Clear junk (validity under 0.2) is dropped, unsure answers go to the bottom, and very common ones sink below the visible 30. Answers that other players often say, and rarity bands that keep coming back "already said", get pushed down. Synonyms of a played guess are hidden too, because the game auto-corrects typos and synonyms.
 
 ## Speed
 

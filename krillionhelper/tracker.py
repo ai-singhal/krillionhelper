@@ -97,6 +97,10 @@ class GameTracker:
             CREATE INDEX IF NOT EXISTS feedbackByPrompt ON feedback (promptKey);
             """
         )
+        try:  # added after the first release; older databases get the column here
+            self.db.execute("ALTER TABLE candidates ADD COLUMN freqRarity REAL")
+        except sqlite3.OperationalError:
+            pass
         self.db.commit()
         self.ignoreBottom = ignoreBottom
         self.playerName = playerName
@@ -430,11 +434,11 @@ class GameTracker:
         with self.lock:
             now = time.time()
             self.db.executemany(
-                "INSERT INTO candidates (roundId, prompt, answer, normalized, finalRank, source, modelPosition, pValid, rarity, at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO candidates (roundId, prompt, answer, normalized, finalRank, source, modelPosition, pValid, rarity, freqRarity, at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (self.roundId, prompt, r["answer"], normalizeGuess(r["answer"]), r["rank"], r.get("source"),
-                     r.get("position"), r.get("pValid"), r.get("rarity"), now)
+                     r.get("position"), r.get("pValid"), r.get("rarity"), r.get("freqRarity"), now)
                     for r in rows
                 ],
             )

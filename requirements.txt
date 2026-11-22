@@ -1,6 +1,8 @@
 anthropic
 mss
 numpy
+# Word-frequency rarity (how Krillion scores many prompts)
+wordfreq
 # macOS: Apple Vision OCR
 pyobjc-framework-Vision; sys_platform == "darwin"
 pyobjc-framework-Quartz; sys_platform == "darwin"

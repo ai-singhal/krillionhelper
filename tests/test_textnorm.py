@@ -141,3 +141,18 @@ def test_turn_lines_are_never_prompts():
         lines = [L("CATEGORY 2", 9, 120, 145), L(junk, 24, 148, 145)]
         text = normalizeOcrText(selectPromptLines(lines, ["category"], STARTERS, DEFAULTS["ignoreText"]))
         assert extractPrompt(text, STARTERS, ["category"]) is None, junk
+
+
+def test_frequency_rarity_orders_common_to_rare():
+    from krillionhelper.rarity import frequencyRarity
+
+    values = [frequencyRarity(w) for w in ["Apple", "Grape", "Kumquat", "Jaboticaba"]]
+    assert values == sorted(values) and values[0] < 1 and values[-1] == 4
+    assert frequencyRarity("Welsh poppy") > frequencyRarity("poppy")  # phrases are rarer than their words
+
+
+def test_near_duplicates_merge():
+    from krillionhelper.textnorm import isNearDuplicate
+
+    assert isNearDuplicate("hotstenia", ["hofstenia"]) and isNearDuplicate("Nemertean", ["nemertean worm"])
+    assert not isNearDuplicate("Cat", ["Bat"]) and not isNearDuplicate("Feijoa", ["Tamarillo"])

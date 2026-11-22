@@ -182,3 +182,19 @@ def isSamePrompt(a, b):
     if len(wordsA) != len(wordsB):
         return False
     return all(wa == wb or SequenceMatcher(None, wa, wb).ratio() >= 0.75 for wa, wb in zip(wordsA, wordsB))
+
+
+def isNearDuplicate(answer, existing):
+    """The game auto-corrects near-spellings, so "hotstenia" is "hofstenia" and "Nemertean" is
+    "nemertean worm" for our purposes. existing: iterable of answers already listed."""
+    key = re.sub(r"[^a-z0-9]", "", answer.lower())
+    for other in existing:
+        otherKey = re.sub(r"[^a-z0-9]", "", other.lower())
+        if key == otherKey:
+            return True
+        shorter, longer = sorted((key, otherKey), key=len)
+        if len(shorter) >= 5 and longer.startswith(shorter):
+            return True
+        if min(len(key), len(otherKey)) >= 5 and SequenceMatcher(None, key, otherKey).ratio() >= 0.85:
+            return True
+    return False

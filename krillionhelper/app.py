@@ -12,11 +12,12 @@ import mss.tools
 from .answers import AnswerError, AnswerGenerator, makeClient
 from .constraints import failedRules, parseConstraints
 from .jev import JevRanker, rankKey
+from .rarity import frequencyRarity
 from .cache import AnswerCache
 from .capture import RegionWatcher
 from .config import DEFAULT_CONFIG_PATH, PROJECT_DIR, saveConfig
 from .ocr import createOcrEngine
-from .textnorm import extractPrompt, isSamePrompt, normalizeOcrText, promptKey, selectPromptLines
+from .textnorm import extractPrompt, isNearDuplicate, isSamePrompt, normalizeOcrText, promptKey, selectPromptLines
 from .tracker import GameTracker, normalizeGuess
 
 CACHE_PATH = PROJECT_DIR / "answers.sqlite3"
@@ -214,10 +215,14 @@ class TriviaApp:
         def sortKey(answer):
             item = info[answer]
             commonness = 0.15 * timesGuessed.get(normalizeGuess(answer), 0)
+            # Rarity = average of Jev's judgment (or, until Jev answers, the model's own order) and
+            # how often the word turns up in written text, which is how Krillion scores many prompts.
             if item["jev"]:
                 pValid, rarity = item["jev"]
             else:
                 pValid, rarity = 0.75, 4 * (1 - min(item["position"], 1))
+            if item["freq"] is not None:
+                rarity = (rarity + item["freq"]) / 2
             if item["source"] == "bank":
                 # Proven for you here: validity is certain, but it still has to be rare to rank high.
                 pValid = 1.0
@@ -233,9 +238,10 @@ class TriviaApp:
                 for answer in newAnswers:
                     position = positions.get(model, 0)
                     positions[model] = position + 1
-                    if len(answers) < count and answer.lower() not in seen:
+                    if len(answers) < count and answer.lower() not in seen and not isNearDuplicate(answer, answers):
                         seen.add(answer.lower())
-                        info[answer] = {"source": model, "position": position / count, "jev": None}
+                        info[answer] = {"source": model, "position": position / count, "jev": None,
+                                        "freq": frequencyRarity(answer)}
                         answers.append(answer)
                         added = True
                         pendingJev.append(answer)
@@ -363,7 +369,8 @@ class TriviaApp:
                 print(f"[jev] dropped as clearly wrong: {dropped}", flush=True)
             self.tracker.recordCandidates(prompt, [
                 {"answer": a, "rank": i, "source": info[a]["source"], "position": info[a]["position"],
-                 "pValid": (info[a]["jev"] or (None, None))[0], "rarity": (info[a]["jev"] or (None, None))[1]}
+                 "pValid": (info[a]["jev"] or (None, None))[0], "rarity": (info[a]["jev"] or (None, None))[1],
+                 "freqRarity": info[a]["freq"]}
                 for i, a in enumerate(answers)
             ])
         self._logLatency(prompt, source, timing, cached=False, answerCount=len(answers))
