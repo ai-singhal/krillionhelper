@@ -69,6 +69,13 @@
   #taken b { color: var(--warn); font-weight: 600; }
   #rules { cursor: help; }
   .answer .star { flex: none; color: var(--warn); font-size: 0.6em; }
+  /* Krillion rarity tiers (published answers in daily mode) */
+  .answer .tag { flex: none; font-size: 0.42em; font-weight: 700; letter-spacing: 0.04em; padding: 0.15em 0.4em; border-radius: 5px; border: 1px solid currentColor; }
+  .answer.tier-krillion .text, .answer.tier-krillion .tag { color: #f5c542; }
+  .answer.tier-deepcut .text, .answer.tier-deepcut .tag { color: #b483ff; }
+  .answer.tier-rare .text, .answer.tier-rare .tag { color: #ff6b6b; }
+  .answer.tier-schooler .text, .answer.tier-schooler .tag { color: #5aa9ff; }
+  #sheet b { color: #f5c542; }
 
   #answers {
     flex: 1;
@@ -173,6 +180,7 @@
     <div id="prompt" class="placeholder">Waiting for a prompt…</div>
     <div id="meta" class="sub"><span id="status">Connecting…</span><span id="latency"></span><span id="engine"></span><span id="learned"></span></div>
     <div id="taken" class="sub"></div>
+    <div id="sheet" class="sub"></div>
     <div id="rules" class="sub"></div>
     <div id="ocr" class="sub"></div>
   </header>
@@ -339,7 +347,13 @@ function render(next) {
     return gone.has(k) || takenKeys.some((t) => t.length >= 3 && k.startsWith(t));
   };
   const goldKeys = new Set((state.gold || []).map(norm));
-  visible = state.answers.filter((a) => !isGone(a)).slice(0, cells.length);
+  // Daily mode: today's published answers first (One in a Krillion, Deep Cut, Rare, Schooler),
+  // then Claude's ranked list without duplicates.
+  const tierOf = new Map();
+  const published = ((state.lookup && state.lookup.answers) || []).filter(([a]) => !isGone(a));
+  published.forEach(([a, tier]) => tierOf.set(norm(a), tier));
+  const ranked = state.answers.filter((a) => !isGone(a) && !tierOf.has(norm(a)));
+  visible = [...published.map(([a]) => a), ...ranked].slice(0, cells.length);
 
   const labels = {
     waiting: state.hasRegion ? "Watching the screen" : "Pick the prompt area (Areas button)",
@@ -370,6 +384,15 @@ function render(next) {
     ? "Taken: " + taken.map((t) => `<b>${escapeHtml(t.text)}</b>${t.player ? " (" + escapeHtml(t.player) + ")" : ""}`).join(", ")
     : (state.hasGameRegion ? "Taken: none yet" : "Pick the whole game window (Areas) to auto-remove answers others take");
   $("ocr").textContent = state.ocrText ? `Screen text: ${state.ocrText}` : "";
+  const sheet = state.sheet || {};
+  const host = (sheet.source || "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+  const krill = published.find(([, t]) => t === "ONE IN A KRILLION");
+  $("sheet").innerHTML = state.mode !== "daily" ? "" :
+    sheet.status === "loading" ? "Fetching today's answer sheet…" :
+    sheet.status === "missing" ? "No published answer sheet found for today: showing Claude's answers" :
+    sheet.status === "ready" ? (state.lookup
+      ? `Today's sheet (${escapeHtml(host)}): One in a Krillion = <b>${escapeHtml(krill ? krill[0] : "?")}</b>`
+      : `Today's sheet (${escapeHtml(host)}) loaded; this prompt isn't on it`) : "";
   const rules = (state.insights || "").split("\n").map((r) => r.replace(/^[-•*\d.\s]+/, "").trim()).filter(Boolean);
   $("rules").textContent = rules.length ? "Learned: " + rules.join(" · ") : "";
   $("rules").title = state.insights || "";
@@ -386,6 +409,22 @@ function render(next) {
     const key = norm(answer);
     cell.classList.toggle("empty", !answer);
     cell.classList.toggle("used", !!answer && used.has(key));
+    const tier = answer ? tierOf.get(key) : null;
+    const tierClass = { "ONE IN A KRILLION": "tier-krillion", "DEEP CUT": "tier-deepcut", "RARE": "tier-rare", "SCHOOLER": "tier-schooler" }[tier];
+    cell.classList.remove("tier-krillion", "tier-deepcut", "tier-rare", "tier-schooler");
+    if (tierClass) cell.classList.add(tierClass);
+    let tag = cell.querySelector(".tag");
+    if (tier) {
+      if (!tag) {
+        tag = document.createElement("span");
+        tag.className = "tag";
+        cell.insertBefore(tag, cell.querySelector(".verdict"));
+      }
+      tag.textContent = { "ONE IN A KRILLION": "KRILLION", "DEEP CUT": "DEEP CUT", "RARE": "RARE", "SCHOOLER": "SCHOOLER" }[tier];
+      tag.title = "Published answer, " + tier.toLowerCase();
+    } else if (tag) {
+      tag.remove();
+    }
     let star = cell.querySelector(".star");
     if (answer && goldKeys.has(key)) {
       if (!star) {

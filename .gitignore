@@ -2,6 +2,7 @@
 .venv/
 .env
 config.json
+config.*.json
 
 # Your data: game snapshots contain raw OCR of your screen. Never commit these.
 *.sqlite3

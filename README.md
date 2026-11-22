@@ -27,6 +27,14 @@ On the page, click **Areas** and pick both areas (3-second countdown so you can 
 
 Keep the answers page and your terminal outside both boxes.
 
+## Daily Krillion mode
+
+```sh
+.venv/bin/python -m krillionhelper --daily      # http://localhost:8766, its own screen area
+```
+
+Goal: the single **One in a Krillion** answer. Answer sites publish each day's 7 prompts with answers by rarity tier, so daily mode has Claude find today's sheet with web search once (about 30s, then cached for the day). Every prompt it reads from the screen is matched against that sheet: the Krillion answer is pinned to the top in gold, then Deep Cut (purple), Rare (red), and Schooler (blue). Claude's own ranked list follows as the fallback.
+
 ## Using the page
 
 - Answers run from rarest (1) to most common. ★ = worked for you before on this prompt and no one else has used it.

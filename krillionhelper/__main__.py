@@ -26,13 +26,20 @@ def main():
     parser.add_argument("--recalibrate", action="store_true", help="open the page in region-selection mode")
     parser.add_argument("--overlay-calibration", action="store_true", help="pick the region with a full-screen overlay instead of the page")
     parser.add_argument("--port", type=int, help="web page port (default 8765)")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="path to config.json")
+    parser.add_argument("--config", help="path to config.json (default: config.json, or config.daily.json with --daily)")
     parser.add_argument("--no-watch", action="store_true", help="don't watch the screen; manual prompts only")
     parser.add_argument("--no-open", action="store_true", help="don't open the browser")
+    parser.add_argument("--daily", action="store_true", help="daily Krillion mode: look up today's published answers")
     args = parser.parse_args()
 
-    configPath = Path(args.config)
+    # Daily mode keeps its own screen area and port, so it can run next to Puffer Party mode.
+    configPath = Path(args.config or (PROJECT_DIR / "config.daily.json" if args.daily else DEFAULT_CONFIG_PATH))
     cfg = loadConfig(configPath)
+    if args.daily:
+        cfg["mode"] = "daily"
+        cfg.setdefault("port", 8766)
+        if cfg["port"] == 8765:
+            cfg["port"] = 8766
     if args.port:
         cfg["port"] = args.port
 

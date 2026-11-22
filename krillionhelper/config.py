@@ -12,6 +12,8 @@ DEFAULTS = {
     # read every 0.5s to record other players' guesses, turns and players left.
     "region": None,
     "gameRegion": None,
+    # "party" (Puffer Party) or "daily" (the daily Krillion game: looks up today's published answers).
+    "mode": "party",
     # Your in-game name, so it is never mistaken for another player's guess.
     "playerName": None,
     # Ignore the bottom part of the game window when looking for guesses (your own typing box).

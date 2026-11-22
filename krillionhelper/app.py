@@ -12,6 +12,7 @@ import mss.tools
 from .answers import AnswerError, AnswerGenerator, makeClient
 from .constraints import failedRules, parseConstraints
 from .jev import JevRanker, rankKey
+from .lookup import DailySheet, tieredAnswers
 from .colors import inkColor
 from .rarity import frequencyRarity
 from .cache import AnswerCache
@@ -48,6 +49,7 @@ class TriviaApp:
         if cfg.get("playerName"):
             self.tracker.knownPlayers.add(cfg["playerName"].lower())
         self.client = None
+        self.daily = None  # set in daily mode, once the client exists
         self.jev = JevRanker(cfg["jevModel"]) if cfg.get("rerank") else None
         if self.jev and not self.jev.enabled:
             print("[jev] TYPESAFE_API_KEY not set: ranking by the model's own order", flush=True)
@@ -55,6 +57,8 @@ class TriviaApp:
         # Ask for spares: answers other players take, or the checker rejects, get replaced from these.
         self.candidateCount = cfg["answerCount"] + cfg["spareAnswers"]
         client = self.client = makeClient()  # one connection pool for every model
+        if cfg.get("mode") == "daily":
+            self.daily = DailySheet(client, GAME_DB_PATH, cfg["learnModel"])
         self.generator = AnswerGenerator(
             cfg["model"], self.candidateCount, cfg["thinking"], cfg["effort"], cfg["fastMode"], client=client
         )
@@ -86,6 +90,9 @@ class TriviaApp:
             "stats": self.tracker.stats(),
             "insights": self.tracker.latestInsights()[0],  # checker rules learned from past games
             "gold": [],  # answers proven for you on this prompt and unused by others
+            "mode": cfg.get("mode", "party"),
+            "sheet": None,  # daily mode: {"status", "source", "date"}
+            "lookup": None,  # daily mode: this prompt's published answers [[answer, tier], ...]
         }
 
     # ---------- state ----------
@@ -104,6 +111,8 @@ class TriviaApp:
 
     def start(self, watch=True):
         threading.Thread(target=self._keepWarm, name="keepWarm", daemon=True).start()
+        if self.daily:
+            threading.Thread(target=self._loadSheet, name="dailySheet", daemon=True).start()
         if watch:
             # Create OCR engines here, one at a time: macOS's Quartz/Vision bindings load lazily
             # and two threads loading them at once crash (KeyError: CGColorSpaceCreateDeviceRGB).
@@ -144,7 +153,9 @@ class TriviaApp:
         self.tracker.startRound(prompt)
         verdicts = self.tracker.feedbackFor(prompt)
         gold = self.tracker.goldAnswers(prompt)
+        lookup = self._lookupFor(prompt)
         with self.lock:
+            self.state["lookup"] = lookup
             self.generation += 1
             generation = self.generation
             self.state.update(
@@ -404,6 +415,34 @@ class TriviaApp:
             + ", ".join(f"{k}={v}" for k, v in summary.items()),
             flush=True,
         )
+
+    # ---------- daily mode: today's published answer sheet ----------
+
+    def _loadSheet(self):
+        self._update(sheet={"status": "loading"})
+        print("[daily] fetching today's answer sheet...", flush=True)
+        try:
+            sheet = self.daily.load()
+        except Exception as e:
+            print(f"[daily] couldn't fetch the sheet: {e}", flush=True)
+            sheet = None
+        if not sheet:
+            self._update(sheet={"status": "missing"})
+            print("[daily] no sheet found for today; using Claude's answers only", flush=True)
+            return
+        print(f"[daily] sheet for {sheet.get('date')} from {sheet.get('source')}: {len(sheet.get('prompts', []))} prompts", flush=True)
+        with self.lock:
+            prompt = self.state["prompt"]
+        self._update(sheet={"status": "ready", "source": sheet.get("source"), "date": sheet.get("date")},
+                     lookup=self._lookupFor(prompt) if prompt else None)
+
+    def _lookupFor(self, prompt):
+        if not self.daily or not prompt:
+            return None
+        entry = self.daily.match(prompt)
+        if not entry:
+            return None
+        return {"prompt": entry.get("prompt"), "answers": tieredAnswers(entry)}
 
     # ---------- learning from games ----------
 
