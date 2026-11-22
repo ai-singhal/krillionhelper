@@ -1,0 +1,16 @@
+# Local environment and secrets
+.venv/
+.env
+config.json
+
+# Your data: game snapshots contain raw OCR of your screen. Never commit these.
+*.sqlite3
+*.sqlite3-journal
+latency.log
+tools/bench_results.json
+tests/harness_config.json
+
+# Python / OS noise
+__pycache__/
+.pytest_cache/
+.DS_Store

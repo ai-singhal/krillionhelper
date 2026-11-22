@@ -1,0 +1,8 @@
+anthropic
+mss
+numpy
+# macOS: Apple Vision OCR
+pyobjc-framework-Vision; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"
+# Windows/Linux: RapidOCR (Tesseract is used instead if this is missing and pytesseract is installed)
+rapidocr-onnxruntime; sys_platform != "darwin"

@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest
+pyflakes
+pillow  # tools/latencyHarness.py draws a Puffer Party lookalike card

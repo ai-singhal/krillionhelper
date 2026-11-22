@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trivia Answers</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --panel: #1a1e26;
+    --text: #f4f5f7;
+    --muted: #8a93a3;
+    --faint: #2c323d;
+    --used: #4b5260;
+    --accent: #7dd3fc;
+    --error: #fca5a5;
+    --ok: #86efac;
+    --warn: #fcd34d;
+    --line: #232833;
+    --font: 32px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f7f5;
+      --panel: #e9eaee;
+      --text: #121418;
+      --muted: #5f6775;
+      --faint: #d4d7dd;
+      --used: #b4b9c2;
+      --accent: #0369a1;
+      --error: #b91c1c;
+      --ok: #15803d;
+      --warn: #a16207;
+      --line: #dfe1e6;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header { padding: 1vh 2vw 0.7vh; border-bottom: 1px solid var(--line); min-width: 0; }
+  #prompt {
+    font-size: clamp(16px, min(3.4vh, 3.2vw), 38px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #prompt.placeholder { color: var(--muted); font-weight: 500; }
+  .sub {
+    font-size: clamp(11px, 1.45vh, 14px);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.25vh;
+  }
+  #meta span + span::before { content: "·"; margin: 0 0.6em; color: var(--faint); }
+  #status.loading { color: var(--accent); }
+  #status.done { color: var(--ok); }
+  #status.error { color: var(--error); }
+  #taken b { color: var(--warn); font-weight: 600; }
+  #rules { cursor: help; }
+  .answer .star { flex: none; color: var(--warn); font-size: 0.6em; }
+
+  #answers {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-auto-flow: column;
+    column-gap: 1.4vw;
+    padding: 0.6vh 1.4vw;
+  }
+  .answer {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    min-width: 0;
+    padding: 0 0.3em;
+    border-radius: 7px;
+    font-size: var(--font);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 120ms;
+  }
+  .answer:hover { background: var(--panel); }
+  .answer .num {
+    flex: none;
+    width: 1.5em;
+    text-align: right;
+    font-size: 0.52em;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .answer .text { flex: 1; min-width: 0; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .answer .verdict { flex: none; display: none; gap: 0.25em; }
+  .answer.used .verdict { display: flex; }
+  .verdict button {
+    font: inherit;
+    font-size: 0.5em;
+    line-height: 1;
+    padding: 0.35em 0.5em;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .verdict button.yes:hover, .answer.accepted .verdict button.yes { color: var(--ok); border-color: var(--ok); }
+  .verdict button.no:hover { color: var(--error); border-color: var(--error); }
+  .answer.empty { cursor: default; }
+  .answer.empty:hover { background: none; }
+  .answer.empty .text { color: var(--faint); }
+  .answer.used .text { color: var(--used); text-decoration: line-through; text-decoration-thickness: 0.06em; }
+  .answer.accepted .text { color: var(--ok); text-decoration: none; }
+  .answer.used .num { color: var(--used); }
+  .answer.copied { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+  form { display: flex; gap: 0.5em; padding: 0.7vh 2vw 1vh; border-top: 1px solid var(--line); }
+  input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: clamp(13px, 1.8vh, 17px);
+    padding: 0.4em 0.7em;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button.ctl {
+    font: inherit;
+    font-size: clamp(13px, 1.8vh, 17px);
+    padding: 0.4em 0.8em;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button.ctl:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: #062033; border-color: var(--accent); font-weight: 600; }
+
+  #picker {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--bg) 96%, transparent);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+  #picker[hidden] { display: none; }
+  #pickerBar { display: flex; align-items: center; gap: 0.6em; padding: 1.2vh 2vw; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  #pickerMsg { flex: 1; min-width: 12em; font-size: clamp(14px, 2vh, 19px); }
+  #pickerStage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 1.5vh; }
+  #pickerFrame { position: relative; line-height: 0; cursor: crosshair; touch-action: none; }
+  #pickerImg { max-width: 100%; max-height: calc(100vh - 12vh); border-radius: 6px; user-select: none; -webkit-user-drag: none; }
+  #pickerBox { position: absolute; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
+  #countdown { font-size: clamp(40px, 12vh, 120px); font-weight: 700; color: var(--accent); }
+</style>
+</head>
+<body>
+  <header>
+    <div id="prompt" class="placeholder">Waiting for a prompt…</div>
+    <div id="meta" class="sub"><span id="status">Connecting…</span><span id="latency"></span><span id="engine"></span><span id="learned"></span></div>
+    <div id="taken" class="sub"></div>
+    <div id="rules" class="sub"></div>
+    <div id="ocr" class="sub"></div>
+  </header>
+  <main id="answers"></main>
+  <form id="manual" autocomplete="off">
+    <input id="manualInput" type="text" placeholder="OCR missed it? Type the prompt and press Enter" spellcheck="false">
+    <button class="ctl" type="submit">Go</button>
+    <button class="ctl" type="button" id="regen" title="Ask again, skipping the cache">↻</button>
+    <button class="ctl" type="button" id="areas" title="Pick the screen areas to watch">Areas</button>
+  </form>
+
+  <div id="picker" hidden>
+    <div id="pickerBar">
+      <span id="pickerMsg"></span>
+      <button class="ctl primary" type="button" id="pickPrompt">Prompt card</button>
+      <button class="ctl" type="button" id="pickGame">Whole game window</button>
+      <button class="ctl primary" type="button" id="pickSave" hidden>Save</button>
+      <button class="ctl" type="button" id="pickRetake" hidden>Retake</button>
+      <button class="ctl" type="button" id="pickCancel">Cancel</button>
+    </div>
+    <div id="pickerStage">
+      <div id="countdown" hidden></div>
+      <div id="pickerFrame" hidden><img id="pickerImg" alt="Screen capture"><div id="pickerBox" hidden></div></div>
+    </div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const answersEl = $("answers");
+let state = null;
+let cells = [];
+let visible = [];
+let usedKey = "";
+let used = new Set();
+
+function norm(text) {
+  let key = (text || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (key.length > 3 && key.endsWith("s") && !key.endsWith("ss")) key = key.slice(0, -1);
+  return key;
+}
+
+function post(path, body) {
+  return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+}
+
+/* ---------- layout ---------- */
+
+function layout() {
+  const count = cells.length;
+  const wide = innerWidth / Math.max(innerHeight, 1) > 1.15;
+  const cols = count > 20 && wide ? 3 : 2;
+  const rows = Math.ceil(count / cols);
+  answersEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  answersEl.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  const rect = answersEl.getBoundingClientRect();
+  const cellH = rect.height / rows;
+  const cellW = rect.width / cols;
+  const font = Math.max(12, Math.min(cellH * 0.6, cellW / 8.5, 46));
+  document.documentElement.style.setProperty("--font", font + "px");
+  cells.forEach(fitText);
+}
+
+function buildCells(count) {
+  if (cells.length === count) return;
+  answersEl.innerHTML = "";
+  cells = [];
+  for (let i = 0; i < count; i++) {
+    const cell = document.createElement("div");
+    cell.className = "answer empty";
+    cell.innerHTML = `<span class="num">${i + 1}</span><span class="text">·</span>` +
+      `<span class="verdict"><button class="yes" title="The game accepted it">✓</button><button class="no" title="The game rejected it">✗</button></span>`;
+    cell.querySelector(".text").addEventListener("click", () => onAnswerClick(i));
+    cell.querySelector(".num").addEventListener("click", () => onAnswerClick(i));
+    cell.querySelector(".yes").addEventListener("click", (e) => { e.stopPropagation(); verdict(i, "accepted"); });
+    cell.querySelector(".no").addEventListener("click", (e) => { e.stopPropagation(); verdict(i, "rejected"); });
+    answersEl.appendChild(cell);
+    cells.push(cell);
+  }
+  layout();
+}
+
+function fitText(cell) {
+  const text = cell.querySelector(".text");
+  text.style.fontSize = "";
+  let scale = 1;
+  while (text.scrollWidth > text.clientWidth && scale > 0.5) {
+    scale -= 0.06;
+    text.style.fontSize = scale + "em";
+  }
+}
+
+/* ---------- used / feedback ---------- */
+
+function loadUsed(prompt) {
+  usedKey = "used:" + prompt.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  try { used = new Set(JSON.parse(localStorage.getItem(usedKey) || "[]")); }
+  catch { used = new Set(); }
+}
+
+function saveUsed() {
+  try { localStorage.setItem(usedKey, JSON.stringify([...used])); } catch {}
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  }
+}
+
+async function onAnswerClick(i) {
+  const answer = visible[i];
+  if (!answer) return;
+  await copyText(answer);
+  const first = !used.has(norm(answer));
+  used.add(norm(answer));
+  saveUsed();
+  if (first) post("/api/used", { answer });
+  const cell = cells[i];
+  cell.classList.add("used", "copied");
+  setTimeout(() => cell.classList.remove("copied"), 350);
+}
+
+function verdict(i, value) {
+  const answer = visible[i];
+  if (answer) post("/api/feedback", { answer, verdict: value });
+}
+
+/* ---------- render ---------- */
+
+function render(next) {
+  const promptChanged = !state || next.id !== state.id;
+  state = next;
+  buildCells(state.answerCount || 30);
+  if (promptChanged) loadUsed(state.prompt || "");
+
+  $("prompt").textContent = state.prompt || "Waiting for a prompt…";
+  $("prompt").classList.toggle("placeholder", !state.prompt);
+  $("prompt").title = state.prompt || "";
+
+  // Hide everything that's no longer usable: guesses that went through (yours or other players'),
+  // your accepted answers, and rejected ones. A cut-off guess ("appl") hides answers starting with it.
+  const takenKeys = (state.taken || []).map((t) => norm(t.text)).filter(Boolean);
+  const gone = new Set([...takenKeys, ...(state.rejected || []), ...(state.accepted || [])]);
+  const isGone = (a) => {
+    const k = norm(a);
+    return gone.has(k) || takenKeys.some((t) => t.length >= 3 && k.startsWith(t));
+  };
+  const goldKeys = new Set((state.gold || []).map(norm));
+  visible = state.answers.filter((a) => !isGone(a)).slice(0, cells.length);
+
+  const labels = {
+    waiting: state.hasRegion ? "Watching the screen" : "Pick the prompt area (Areas button)",
+    loading: state.answers.length ? `Streaming ${visible.length}/${state.answerCount}` : "Asking Claude…",
+    done: state.cached ? "Cached" : "Done",
+    error: state.error || "Error",
+  };
+  $("status").textContent = labels[state.status] || state.status;
+  $("status").className = state.status;
+
+  const lat = state.latency || {};
+  $("latency").textContent = lat.firstAnswerMs != null
+    ? `first answer ${(lat.firstAnswerMs / 1000).toFixed(2)}s` + (lat.allAnswersMs != null ? ` · all ${(lat.allAnswersMs / 1000).toFixed(2)}s` : "")
+    : "";
+  $("latency").hidden = !$("latency").textContent;
+  $("engine").textContent = [state.source === "manual" ? "typed" : state.source ? "from screen" : "", state.ocrEngine].filter(Boolean).join(", ");
+  $("engine").hidden = !$("engine").textContent;
+  const st = state.stats || {};
+  $("learned").textContent = state.hasGameRegion || st.guesses || st.rejected
+    ? (st.rating ? `rating ${st.rating}${st.lastDelta != null ? ` (${st.lastDelta > 0 ? "+" : ""}${st.lastDelta})` : ""} · ${st.wins}/${st.games} won · ` : "") +
+      `${st.rounds || 0} rounds · ${st.guesses || 0} player guesses · you ${st.accepted || 0}✓ ${st.rejected || 0}✗` +
+      (st.acceptRate != null ? ` (${st.acceptRate}% ok)` : "")
+    : "";
+  $("learned").hidden = !$("learned").textContent;
+
+  const taken = state.taken || [];
+  $("taken").innerHTML = taken.length
+    ? "Taken: " + taken.map((t) => `<b>${escapeHtml(t.text)}</b>${t.player ? " (" + escapeHtml(t.player) + ")" : ""}`).join(", ")
+    : (state.hasGameRegion ? "Taken: none yet" : "Pick the whole game window (Areas) to auto-remove answers others take");
+  $("ocr").textContent = state.ocrText ? `Screen text: ${state.ocrText}` : "";
+  const rules = (state.insights || "").split("\n").map((r) => r.replace(/^[-•*\d.\s]+/, "").trim()).filter(Boolean);
+  $("rules").textContent = rules.length ? "Learned: " + rules.join(" · ") : "";
+  $("rules").title = state.insights || "";
+
+  cells.forEach((cell, i) => {
+    const answer = visible[i];
+    const text = cell.querySelector(".text");
+    const value = answer || "·";
+    if (text.textContent !== value) {
+      text.textContent = value;
+      cell.title = answer ? "Click to copy" : "";
+      fitText(cell);
+    }
+    const key = norm(answer);
+    cell.classList.toggle("empty", !answer);
+    cell.classList.toggle("used", !!answer && used.has(key));
+    let star = cell.querySelector(".star");
+    if (answer && goldKeys.has(key)) {
+      if (!star) {
+        star = document.createElement("span");
+        star.className = "star";
+        star.textContent = "★";
+        star.title = "Worked for you before, and no one else has used it";
+        cell.insertBefore(star, cell.querySelector(".text"));
+      }
+    } else if (star) {
+      star.remove();
+    }
+  });
+  if (!state.hasRegion && !pickerShownOnce) openPicker();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+/* ---------- area picker ---------- */
+
+let pickerShownOnce = false;
+let pickKind = "prompt";
+let shotMeta = null;
+let drag = null;
+let box = null;
+
+function pickerStep(step) {
+  const choose = step === "choose", select = step === "select";
+  $("pickPrompt").hidden = !choose;
+  $("pickGame").hidden = !choose;
+  $("pickSave").hidden = !select;
+  $("pickRetake").hidden = !select;
+  $("countdown").hidden = step !== "countdown";
+  $("pickerFrame").hidden = !select;
+}
+
+function openPicker() {
+  pickerShownOnce = true;
+  $("picker").hidden = false;
+  $("pickerMsg").textContent = "Which area? The prompt card is read fast for answers. The whole game window is used to spot guesses other players make.";
+  pickerStep("choose");
+}
+
+function closePicker() {
+  $("picker").hidden = true;
+  $("pickerBox").hidden = true;
+  box = null;
+}
+
+async function capture(kind) {
+  pickKind = kind;
+  pickerStep("countdown");
+  $("pickerMsg").textContent = "Switch to the game now. The screen is captured when the countdown ends.";
+  let n = 3;
+  $("countdown").textContent = n;
+  const timer = setInterval(() => { n -= 1; $("countdown").textContent = n > 0 ? n : "…"; }, 1000);
+  try {
+    const response = await post("/api/snapshot", { delayMs: 3000 });
+    shotMeta = await response.json();
+  } finally {
+    clearInterval(timer);
+  }
+  $("pickerImg").src = "/api/snapshot.png?t=" + Date.now();
+  await $("pickerImg").decode().catch(() => {});
+  pickerStep("select");
+  $("pickerBox").hidden = true;
+  box = null;
+  $("pickerMsg").textContent = kind === "prompt"
+    ? "Drag a box around the prompt card: the CATEGORY line and the prompt text. Then Save."
+    : "Drag a box around the whole game window (keep this page outside it). Then Save.";
+}
+
+function pointerPos(e) {
+  const r = $("pickerImg").getBoundingClientRect();
+  return { x: Math.min(Math.max(e.clientX - r.left, 0), r.width), y: Math.min(Math.max(e.clientY - r.top, 0), r.height) };
+}
+
+$("pickerFrame").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  drag = pointerPos(e);
+  $("pickerFrame").setPointerCapture(e.pointerId);
+});
+$("pickerFrame").addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const p = pointerPos(e);
+  box = { x: Math.min(drag.x, p.x), y: Math.min(drag.y, p.y), w: Math.abs(p.x - drag.x), h: Math.abs(p.y - drag.y) };
+  Object.assign($("pickerBox").style, { left: box.x + "px", top: box.y + "px", width: box.w + "px", height: box.h + "px" });
+  $("pickerBox").hidden = false;
+});
+$("pickerFrame").addEventListener("pointerup", () => { drag = null; });
+
+$("pickSave").addEventListener("click", async () => {
+  if (!box || box.w < 6 || box.h < 6 || !shotMeta) {
+    $("pickerMsg").textContent = "Drag a box first.";
+    return;
+  }
+  const img = $("pickerImg");
+  const sx = shotMeta.width / img.clientWidth;
+  const sy = shotMeta.height / img.clientHeight;
+  const region = {
+    kind: pickKind,
+    left: Math.round(shotMeta.left + box.x * sx),
+    top: Math.round(shotMeta.top + box.y * sy),
+    width: Math.round(box.w * sx),
+    height: Math.round(box.h * sy),
+  };
+  const response = await post("/api/region", region);
+  if (!response.ok) {
+    $("pickerMsg").textContent = "Couldn't save: " + (await response.text());
+    return;
+  }
+  closePicker();
+});
+$("pickPrompt").addEventListener("click", () => capture("prompt"));
+$("pickGame").addEventListener("click", () => capture("game"));
+$("pickRetake").addEventListener("click", () => capture(pickKind));
+$("pickCancel").addEventListener("click", closePicker);
+$("areas").addEventListener("click", openPicker);
+
+/* ---------- wiring ---------- */
+
+function connect() {
+  const events = new EventSource("/events");
+  events.onmessage = (e) => render(JSON.parse(e.data));
+  events.onerror = () => {
+    $("status").textContent = "Disconnected, retrying…";
+    $("status").className = "error";
+  };
+}
+
+$("manual").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const prompt = $("manualInput").value.trim();
+  if (!prompt) return;
+  await post("/api/prompt", { prompt });
+  $("manualInput").value = "";
+});
+$("regen").addEventListener("click", () => post("/api/regenerate"));
+
+window.addEventListener("resize", layout);
+buildCells(30);
+if (location.hash === "#select") { history.replaceState(null, "", "/"); openPicker(); }
+connect();
+</script>
+</body>
+</html>
