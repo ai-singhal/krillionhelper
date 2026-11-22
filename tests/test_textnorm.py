@@ -146,8 +146,8 @@ def test_turn_lines_are_never_prompts():
 def test_frequency_rarity_orders_common_to_rare():
     from krillionhelper.rarity import frequencyRarity
 
-    values = [frequencyRarity(w) for w in ["Apple", "Grape", "Kumquat", "Jaboticaba"]]
-    assert values == sorted(values) and values[0] < 1 and values[-1] == 4
+    values = [frequencyRarity(w) for w in ["Apple", "Grape", "Kumquat", "Acerola"]]
+    assert values == sorted(values) and values[0] < 1 and values[-1] > 3
     assert frequencyRarity("Welsh poppy") > frequencyRarity("poppy")  # phrases are rarer than their words
 
 
@@ -156,3 +156,9 @@ def test_near_duplicates_merge():
 
     assert isNearDuplicate("hotstenia", ["hofstenia"]) and isNearDuplicate("Nemertean", ["nemertean worm"])
     assert not isNearDuplicate("Cat", ["Bat"]) and not isNearDuplicate("Feijoa", ["Tamarillo"])
+
+
+def test_unknown_words_get_no_rarity_signal():
+    from krillionhelper.rarity import frequencyRarity
+
+    assert frequencyRarity("Hotstenia") is None  # never seen: maybe a typo, not "rarest"

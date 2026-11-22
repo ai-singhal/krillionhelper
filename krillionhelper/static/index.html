@@ -313,7 +313,14 @@ function verdict(i, value) {
 
 /* ---------- render ---------- */
 
+let appVersion = null;
+
 function render(next) {
+  if (appVersion && next.appVersion && next.appVersion !== appVersion) {
+    location.reload();  // the app restarted, maybe with a newer page
+    return;
+  }
+  appVersion = appVersion || next.appVersion;
   const promptChanged = !state || next.id !== state.id;
   state = next;
   buildCells(state.answerCount || 30);

@@ -78,6 +78,7 @@ def groupIntoLines(pieces):
             rows.append({"center": center, "top": top, "height": height, "left": left, "right": right, "items": [(left, text)]})
     rows.sort(key=lambda r: (r["top"], r["left"]))
     return [
-        OcrLine(" ".join(text for _, text in sorted(row["items"])), row["height"], row["top"], row["left"])
+        OcrLine(" ".join(text for _, text in sorted(row["items"])), row["height"], row["top"], row["left"],
+                row["right"] - row["left"])
         for row in rows
     ]

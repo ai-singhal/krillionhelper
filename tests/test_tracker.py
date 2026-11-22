@@ -110,7 +110,7 @@ def test_game_verdict_lines_hide_and_label_your_answers(tmp_path):
     t = start(tmp_path)
     result = t.observe(frame(extra=[L('"turnstile": no echo. keep going', 14, 500, 300)]), 787, [PROMPT])
     assert result["guesses"] == [{"text": "turnstile", "player": "you"}]
-    assert result["labels"] == [("turnstile", "accepted")]
+    assert result["labels"] == [("turnstile", "rejected")]  # "no echo" = the game didn't recognize it
     # Same line still on screen next read: not counted twice.
     assert t.observe(frame(extra=[L('"turnstile": no echo: keep going', 14, 500, 300)]), 787, [PROMPT])["guesses"] == []
     # A message we don't know yet: hidden (it was played) and stored for the rules writer, but not labeled.
@@ -135,3 +135,55 @@ def test_last_rounds_verdict_still_on_screen_is_not_credited_to_the_new_prompt(t
     for _ in range(4):
         assert t.observe(stale, 787, [])["labels"] == []
     assert t.feedbackFor("Name a country larger than one million square kilometres") == {"accepted": [], "rejected": []}
+
+
+
+def test_fully_typed_answer_is_crossed_out_immediately(tmp_path):
+    t = start(tmp_path)
+    t.observe(frame("kiwi"), 787, [PROMPT])
+    ours = ["Coverlet", "Counterpane", "Bolster"]
+    # Partial typing doesn't count yet...
+    assert guesses(t.observe(frame("kiwi", "Cov"), 787, [PROMPT], ownAnswers=ours)) == []
+    # ...the full word does, before the turn even changes.
+    assert guesses(t.observe(frame("kiwi", "coverlet|"), 787, [PROMPT], ownAnswers=ours)) == [{"text": "Coverlet", "player": "kiwi"}]
+    # Your own typing in the answer box (bottom of the game window) counts as yours.
+    assert guesses(t.observe(frame(extra=[L("·2 bolster", 18, 700, 160)]), 787, [PROMPT], ownAnswers=ours)) == [{"text": "Bolster", "player": "you"}]
+
+
+def test_our_answers_page_inside_the_game_area_is_ignored(tmp_path):
+    t = start(tmp_path)
+    ours = ["Coverlet", "Counterpane", "Bolster", "Valance", "Duvet"]
+    page = [L(a, 26, 100 + 40 * i, 780) for i, a in enumerate(ours)]
+    assert guesses(t.observe(frame(extra=page), 787, [PROMPT], ownAnswers=ours)) == []
+
+
+def test_tier_badge_marks_the_answer_accepted(tmp_path):
+    t = start(tmp_path)
+    t.observe(frame("puffermain"), 787, [PROMPT])  # your turn
+    t.recordMyAnswer("Valance")
+    t.observe(frame("puffermain", extra=[L("RARE", 12, 30, 330)]), 787, [PROMPT])
+    result = t.observe(frame("kiwi"), 787, [PROMPT])
+    assert ("Valance", "accepted") in result["labels"]
+    tier = t.db.execute("SELECT tier, points FROM acceptances WHERE answer = 'Valance'").fetchone()
+    assert tier == ("RARE", 60)
+
+
+def test_tier_read_from_answer_color_and_colors_learned_from_tier_text(tmp_path):
+    t = start(tmp_path)
+    # Tier name written out once: its on-screen color is learned.
+    t.observe(frame(extra=[L("SCHOOLER", 12, 30, 330, 80, (60, 130, 250))]), 787, [PROMPT])
+    assert t.tierColors["SCHOOLER"] == (60, 130, 250)
+    # Later an opponent's answer turns that blue with no tier text: accepted as SCHOOLER.
+    t.observe(frame("kiwi"), 787, [PROMPT])
+    t.observe(frame("kiwi", extra=[L("valance", 16, 400, 300, 90, (245, 245, 245))]), 787, [PROMPT])  # typing: white
+    t.observe(frame("kiwi", extra=[L("valance", 16, 400, 300, 90, (62, 128, 248))]), 787, [PROMPT])   # accepted: blue
+    t.observe(frame("otter"), 787, [PROMPT])
+    assert t.db.execute("SELECT player, answer, tier, points FROM acceptances").fetchall() == [("kiwi", "valance", "SCHOOLER", 30)]
+
+
+def test_color_helpers():
+    from krillionhelper.colors import DEFAULT_TIER_COLORS, isPlainText, tierForColor
+
+    assert isPlainText((245, 245, 245)) and not isPlainText((80, 150, 255))
+    assert tierForColor((240, 190, 60), DEFAULT_TIER_COLORS) == "ONE IN A KRILLION"
+    assert tierForColor((245, 245, 245), DEFAULT_TIER_COLORS) is None

@@ -17,6 +17,7 @@ import threading
 import time
 from difflib import SequenceMatcher
 
+from .colors import DEFAULT_TIER_COLORS, tierForColor
 from .textnorm import promptKey
 
 IS_UP = re.compile(r"([A-Za-z0-9_.]{2,24})\s+is\s+up\b", re.IGNORECASE)
@@ -26,8 +27,14 @@ YOU = "you"
 VERDICT = re.compile(r'^\W*["“”\'](?P<answer>[^"“”\',\[\]]{1,40})["“”\']\s*[:;.,\-]\s*(?P<message>[A-Za-z][A-Za-z .,:;!\-]{1,60})$')
 RESULT = re.compile(r"\bYOU\s+(WIN|WON|LOSE|LOST)\b", re.IGNORECASE)
 RATING = re.compile(r"\bRATING\s*(\d{3,4})\s*([+\-−]\s?\d{1,3})?", re.IGNORECASE)
-ACCEPTED_MESSAGE = re.compile(r"\bno\s+echo\b|keep\s+going|nice|good|great|correct", re.IGNORECASE)
-REJECTED_MESSAGE = re.compile(r"echo|already|taken|used|repeat|invalid|not\s+(a|an|valid|accepted|in)|unknown|try\s+again|nope|wrong", re.IGNORECASE)
+# Puffer Party's verdict lines are only shown for answers that did NOT go through:
+#   "no echo. keep going" = the game didn't recognize it (you still hold the puffer)
+#   "already said"         = someone used it already this round
+# An accepted answer shows a rarity tier badge instead (PLANKTON, SCHOOLER, RARE, ...).
+ACCEPTED_MESSAGE = re.compile(r"(?!x)x")  # no verdict line means accepted
+REJECTED_MESSAGE = re.compile(r"echo|already|taken|used|repeat|invalid|not\s+(a|an|valid|accepted|in)|unknown|try\s+again|nope|wrong|keep", re.IGNORECASE)
+TIER = re.compile(r"\b(PLANKTON|TOO\s*CLEVER|SCHOOLER|RARE|DEEP\s*CUT|ONE\s+IN\s+A\s+KRILLION)\b")
+TIER_POINTS = {"PLANKTON": 10, "TOOCLEVER": 15, "SCHOOLER": 30, "RARE": 60, "DEEPCUT": 85, "ONEINAKRILLION": 100}
 # OCR often garbles the turn line ("madz is UD", "ma dz 1s. Up"); never treat those as guesses.
 IS_UP_FUZZY = re.compile(r"[il1|][s5]\.?\s*u\s*[pdo]\b|\bup\.{2,}|\.\.\.$", re.IGNORECASE)
 FLOATING = re.compile(r"f\s?l\s?o\s?a\s?t\s?i\s?n\s?g\D{0,4}(\d{1,2})\s*/\s*(\d{1,2})", re.IGNORECASE)
@@ -93,6 +100,11 @@ class GameTracker:
             CREATE TABLE IF NOT EXISTS games (
                 id INTEGER PRIMARY KEY, at REAL NOT NULL, roundId INTEGER, result TEXT,
                 rating INTEGER, delta INTEGER);
+            CREATE TABLE IF NOT EXISTS acceptances (
+                id INTEGER PRIMARY KEY, roundId INTEGER, prompt TEXT, player TEXT, answer TEXT NOT NULL,
+                normalized TEXT NOT NULL, tier TEXT, points INTEGER, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS tierColors (
+                tier TEXT PRIMARY KEY, r REAL NOT NULL, g REAL NOT NULL, b REAL NOT NULL, samples INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS guessesByPrompt ON guesses (promptKey);
             CREATE INDEX IF NOT EXISTS feedbackByPrompt ON feedback (promptKey);
             """
@@ -104,6 +116,9 @@ class GameTracker:
         self.db.commit()
         self.ignoreBottom = ignoreBottom
         self.playerName = playerName
+        self.tierColors = dict(DEFAULT_TIER_COLORS)
+        for tier, r, g, b in self.db.execute("SELECT tier, r, g, b FROM tierColors"):
+            self.tierColors[tier] = (r, g, b)
         self.roundId = None
         self.promptKey = None
         self.prompt = None
@@ -122,9 +137,13 @@ class GameTracker:
         self.previousTexts = set()
         self.guessedKeys = set()
         self.turnTyped = []  # what the active player has typed so far this turn, oldest first
+        self.typedColor = {}  # latest ink color of each typed text this turn
+        self.typedFirstColor = {}  # its color when first seen (while still being typed)
         self.turnAbandoned = []  # full words typed and then replaced this turn (likely rejected)
         self.myTurnCopies = []  # answers copied from the page during your current turn
         self.verdictsSeen = set()
+        self.badgeVisible = False
+        self.turnTier = None  # tier badge that appeared during the current turn = its answer was accepted
         self.lastLinesJson = None
 
     # ---------- writes ----------
@@ -160,10 +179,12 @@ class GameTracker:
         now = time.time()
         own = {normalizeGuess(a) for a in ownAnswers}
         ownAnswers = list(ownAnswers)
-        lines = [line for line in lines if normalizeGuess(re.sub(r"^\d{1,2}\s+", "", line.text)) not in own]
+        pageLines = [line for line in lines if normalizeGuess(re.sub(r"^\d{1,2}\s+", "", line.text)) in own]
+        if len(pageLines) >= 4:  # many of our answers at once: this app's page is inside the game area
+            lines = [line for line in lines if line not in pageLines]
         promptWords = {w for t in promptTexts for w in re.findall(r"[a-z]+", t.lower())}
         with self.lock:
-            linesJson = json.dumps([[line.text, line.height, line.top, line.left] for line in lines])
+            linesJson = json.dumps([[line.text, line.height, line.top, line.left, line.width, line.color] for line in lines])
             if linesJson != self.lastLinesJson:
                 self.lastLinesJson = linesJson
                 self.db.execute(
@@ -182,8 +203,12 @@ class GameTracker:
             for line in lines:
                 self._readVerdict(line.text, now, found, labels)
             self._readResult(lines, now)
+            self._readTier(lines)
+            if self.roundId is not None:
+                self._crossOutTyped(lines, frameHeight, ownAnswers, now, found)
 
             allTexts = {cleanGuessText(line.text).lower() for line in lines}
+            colors = {cleanGuessText(line.text).lower(): line.color for line in lines if line.color}
             texts = {}
             for line in lines:
                 text = cleanGuessText(line.text)
@@ -208,10 +233,14 @@ class GameTracker:
                 if self.currentUp:
                     self._finishTurn(self.currentUp, now, found, labels, ownAnswers)
                 self.turnTyped, self.turnAbandoned, self.myTurnCopies = [], [], []
+                self.typedColor, self.typedFirstColor = {}, {}
                 self.currentUp = upNow
             for text in texts.values():
                 if text.lower() in self.baseline or len(re.sub(r"[^A-Za-z]", "", text)) < 2:
                     continue
+                if colors.get(text.lower()):
+                    self.typedColor[text.lower()] = colors[text.lower()]
+                    self.typedFirstColor.setdefault(text.lower(), colors[text.lower()])
                 if not self.turnTyped or self.turnTyped[-1].lower() != text.lower():
                     previous = self.turnTyped[-1] if self.turnTyped else None
                     if previous and len(normalizeGuess(previous)) >= 4 and not isContinuation(previous, text):
@@ -219,6 +248,53 @@ class GameTracker:
                     self.turnTyped = (self.turnTyped + [text])[-30:]
             self.db.commit()
             return {"guesses": [g for g in found if g], "labels": labels}
+
+    def _readTier(self, lines):
+        """A tier badge appearing = the answer just played was accepted. When the tier name is
+        written out, its on-screen color is learned, so the color alone can identify it later."""
+        tier = None
+        for line in lines:
+            match = TIER.search(line.text)
+            if match:
+                tier = re.sub(r"\s+", " ", match.group(1).upper())
+                if line.color:
+                    self._learnTierColor(tier, line.color)
+        if tier and not self.badgeVisible:
+            self.turnTier = tier
+        self.badgeVisible = bool(tier)
+
+    def _tierFromColorChange(self, key):
+        """The answer changed color during the turn (typed, then shown in its tier's color)."""
+        first, last = self.typedFirstColor.get(key), self.typedColor.get(key)
+        if not first or not last or sum((a - b) ** 2 for a, b in zip(first, last)) ** 0.5 < 60:
+            return None
+        learned = {t for (t,) in self.db.execute("SELECT tier FROM tierColors")}
+        # Grey is too close to ordinary UI text to trust before the game has shown it in text.
+        colors = {t: c for t, c in self.tierColors.items() if t != "PLANKTON" or t in learned}
+        return tierForColor(last, colors)
+
+    def _learnTierColor(self, tier, rgb):
+        row = self.db.execute("SELECT r, g, b, samples FROM tierColors WHERE tier = ?", (tier,)).fetchone()
+        n = row[3] if row else 0
+        old = row[:3] if row else rgb
+        new = tuple((o * n + c) / (n + 1) for o, c in zip(old, rgb))
+        self.db.execute("INSERT OR REPLACE INTO tierColors (tier, r, g, b, samples) VALUES (?, ?, ?, ?, ?)", (tier, *new, n + 1))
+        self.tierColors[tier] = new
+
+    def _crossOutTyped(self, lines, frameHeight, ownAnswers, now, found):
+        """Someone (you in the answer box, or an opponent) has fully typed one of our answers:
+        it's being played, so cross it out right away instead of waiting for the turn to end."""
+        for line in lines:
+            typed = cleanGuessText(line.text)
+            if not typed or not re.search(r"[A-Za-z]{2}", typed) or len(typed) > MAX_GUESS_CHARS:
+                continue
+            match = matchAnswer(typed, ownAnswers)
+            if not match:
+                continue
+            inAnswerBox = line.top is not None and frameHeight and line.top > frameHeight * (1 - self.ignoreBottom)
+            player = YOU if inAnswerBox else (self.currentUp or "someone")
+            if not self._isPlayerName(typed):
+                found.append(self._recordGuess(match, player, now))
 
     def _readResult(self, lines, now):
         """End-of-game screen: "YOU WIN ... RATING 1247 +16". One row per game."""
@@ -267,20 +343,37 @@ class GameTracker:
             labels.append((answer, label))
 
     def _finishTurn(self, player, now, found, labels, ownAnswers=()):
-        """The turn moved on: hide what the player played. Verdicts come only from the game's own
-        verdict lines (or your ✓/✗), never from reading half-typed text."""
-        typed = self._complete(self._finalTyped(), ownAnswers)
+        """The turn moved on: hide what the player played. If a tier badge appeared during the
+        turn, the game accepted that answer (and the badge says how rare it was)."""
+        rawTyped = self._finalTyped()
+        typed = self._complete(rawTyped, ownAnswers)
+        tier, self.turnTier = self.turnTier, None
+        if not tier and rawTyped:  # no tier text: read it from the color the answer turned
+            tier = self._tierFromColorChange(rawTyped.lower())
         if player == YOU:
             final = self.myTurnCopies[-1] if self.myTurnCopies else typed
             if final:
                 found.append(self._recordGuess(final, YOU, now))
+                if tier:
+                    self._insertFeedback(self.prompt, final, "accepted", "game")
+                    self._insertAcceptance(YOU, final, tier, now)
+                    labels.append((final, "accepted"))
             return
         if typed:
             found.append(self._recordGuess(typed, player, now))
-            self._insertAttempt(player, typed, "final", now)
+            self._insertAttempt(player, typed, f"accepted ({tier})" if tier else "final", now)
+            if tier:
+                self._insertAcceptance(player, typed, tier, now)
         for text in self.turnAbandoned:
             if not typed or normalizeGuess(text) != normalizeGuess(typed):
                 self._insertAttempt(player, self._complete(text, ownAnswers), "abandoned", now)
+
+    def _insertAcceptance(self, player, answer, tier, now):
+        self.db.execute(
+            "INSERT INTO acceptances (roundId, prompt, player, answer, normalized, tier, points, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (self.roundId, self.prompt, player, answer, normalizeGuess(answer), tier,
+             TIER_POINTS.get(re.sub(r"\s+", "", tier.upper())), now),
+        )
 
     def _complete(self, text, ownAnswers):
         """OCR often catches a word before the last keystrokes ("appl"); use the full answer when
@@ -469,6 +562,25 @@ class GameTracker:
                 bands[band] = (total + 1, repeats + int(repeated))
         return {band: repeats / total for band, (total, repeats) in bands.items() if total >= minSamples}
 
+    def pointsByRarityBand(self, minSamples=6):
+        """Learned from results: average points an answer of each rarity band (0-3) actually earned.
+        Accepted answers score their tier's points; "no echo" and "already said" score 0."""
+        with self.lock:
+            outcomes = [(a, r, p) for a, r, p in self.db.execute(
+                "SELECT answer, roundId, points FROM acceptances WHERE points IS NOT NULL")]
+            outcomes += [(a, r, 0) for a, r in self.db.execute("SELECT answer, roundId FROM verdicts")]
+            bands = {}
+            for answer, roundId, points in outcomes:
+                row = self.db.execute(
+                    "SELECT rarity, freqRarity FROM candidates WHERE roundId = ? AND normalized = ? ORDER BY id DESC LIMIT 1",
+                    (roundId, normalizeGuess(answer)),
+                ).fetchone()
+                if not row or row[0] is None:
+                    continue
+                rarity = row[0] if row[1] is None else (row[0] + row[1]) / 2
+                bands.setdefault(min(int(rarity), 3), []).append(points)
+        return {band: sum(p) / len(p) for band, p in bands.items() if len(p) >= minSamples}
+
     def gameStats(self):
         with self.lock:
             rows = self.db.execute("SELECT result, rating, delta FROM games ORDER BY id").fetchall()
@@ -505,6 +617,22 @@ class GameTracker:
             "acceptRate": round(100 * accepted / (accepted + rejected)) if accepted + rejected else None,
             "attempts": attempts, **self.gameStats(),
         }
+
+
+def matchAnswer(typed, answers):
+    """The answer in `answers` that `typed` spells out (exactly, near-spelled, or nearly complete)."""
+    key = normalizeGuess(typed)
+    if len(key) < 3:
+        return None
+    for answer in answers:
+        other = normalizeGuess(answer)
+        if key == other:
+            return answer
+        if len(key) >= 5 and other.startswith(key) and len(key) >= 0.85 * len(other):
+            return answer
+        if len(key) >= 5 and abs(len(key) - len(other)) <= 2 and SequenceMatcher(None, key, other).ratio() >= 0.88:
+            return answer
+    return None
 
 
 def isContinuation(previous, current):

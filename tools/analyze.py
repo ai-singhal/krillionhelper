@@ -17,6 +17,9 @@ DB = Path(__file__).resolve().parent.parent / "game.sqlite3"
 
 
 def main():
+    from krillionhelper.tracker import GameTracker
+
+    GameTracker(DB)  # creates any tables added since the database was made
     db = sqlite3.connect(DB)
     games = db.execute("SELECT result, rating, delta FROM games ORDER BY id").fetchall()
     print("== Games")
@@ -37,12 +40,12 @@ def main():
             "SELECT finalRank, pValid, rarity, source FROM candidates WHERE roundId = ? AND normalized = ? ORDER BY id DESC LIMIT 1",
             (roundId, normalizeGuess(answer)),
         ).fetchone()
-        repeated = "already" in message.lower() or ("echo" in message.lower() and "no echo" not in message.lower())
+        repeated = "already" in message.lower()  # "no echo" = not recognized, "already said" = repeat
         rows.append((answer, repeated, c))
     scored = [r for r in rows if r[2] and r[2][2] is not None]
     if scored:
         print("\n== Which answers survive (answers we suggested, with Jev scores)")
-        for label, group in (("no echo (survived)", [r for r in scored if not r[1]]), ("already said", [r for r in scored if r[1]])):
+        for label, group in (("no echo (unknown)", [r for r in scored if not r[1]]), ("already said", [r for r in scored if r[1]])):
             if group:
                 print(f"{label:20s} n={len(group):3d}  rarity {statistics.mean(r[2][2] for r in group):.2f}  "
                       f"validity {statistics.mean(r[2][1] for r in group):.2f}  shown at #{statistics.mean(r[2][0] for r in group) + 1:.1f}")
@@ -53,6 +56,16 @@ def main():
     repeated = [r[0] for r in rows if r[1]]
     if repeated:
         print(f"\nRepeats ('already said'): {repeated[-15:]}")
+
+    print("\n== Tiers earned (accepted answers)")
+    tiers = db.execute("SELECT player = 'you', tier, COUNT(*), SUM(points) FROM acceptances GROUP BY player = 'you', tier ORDER BY 1 DESC, 4 DESC").fetchall()
+    for mine, tier, n, points in tiers:
+        print(f"{'you' if mine else 'others':6s} {tier or '?':18s} x{n:<3d} {points or 0} pts")
+    if not tiers:
+        print("none recorded yet (tier badges and answer colors are tracked from now on)")
+    tracker = GameTracker(DB)
+    print("points by rarity band (learned):", tracker.pointsByRarityBand(minSamples=1) or "not enough data yet")
+    print("tier colors learned from screen text:", db.execute("SELECT tier, round(r), round(g), round(b), samples FROM tierColors").fetchall())
 
     print("\n== Other players")
     top = db.execute("SELECT text, COUNT(*) n FROM guesses WHERE player != 'you' GROUP BY normalized ORDER BY n DESC LIMIT 12").fetchall()

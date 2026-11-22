@@ -88,12 +88,17 @@ class JevRanker:
         return [a for a in answers if probabilities.get(a, 0) >= threshold]
 
 
-def rankKey(pValid, rarity, commonness=0.0):
+def rankKey(pValid, rarity, commonness=0.0, expectedPoints=None):
     """Lower sorts first. Rarity leads; validity scales it. Likely-rejected answers and answers
     almost everyone says (rarity < 1 of 4) sink below everything else."""
-    value = (rarity / 4) * (0.4 + 0.6 * pValid) - commonness
-    if pValid < 0.35:
-        value -= 2
+    # Rarity pays off up to "Deep Cut"; beyond that the game's answer list often doesn't know the
+    # word ("no echo"), so extra obscurity earns nothing and validity matters more.
+    # Once enough games are tracked, use the points this rarity band actually earned (tiers:
+    # 10 Plankton .. 100 One in a Krillion; "no echo" = 0) instead of the raw rarity estimate.
+    worth = expectedPoints / 100 if expectedPoints is not None else min(rarity, 3.3) / 4
+    value = worth * pValid ** 1.5 - commonness
+    if pValid < 0.55:
+        value -= 2  # unsure: keep, but at the bottom
     if rarity < 1:
         value -= 1
     return -value

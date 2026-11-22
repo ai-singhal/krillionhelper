@@ -33,7 +33,7 @@ DEFAULTS = {
     "rerank": True,
     # Answers Jev thinks the checker would almost surely reject are dropped, so the list can be
     # shorter than answerCount. Unsure ones (up to ~0.5) stay but sink to the bottom.
-    "dropBelowValidity": 0.2,
+    "dropBelowValidity": 0.3,
     "jevModel": "jev-latest",
     # Writes the learned checker rules from accumulated verdicts (in the background, not per prompt).
     "learnModel": "claude-opus-5-5",

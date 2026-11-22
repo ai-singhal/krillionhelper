@@ -12,6 +12,7 @@ import mss.tools
 from .answers import AnswerError, AnswerGenerator, makeClient
 from .constraints import failedRules, parseConstraints
 from .jev import JevRanker, rankKey
+from .colors import inkColor
 from .rarity import frequencyRarity
 from .cache import AnswerCache
 from .capture import RegionWatcher
@@ -76,6 +77,7 @@ class TriviaApp:
             "ocrText": "",
             "model": cfg["model"],
             "hasRegion": bool(cfg.get("region")),
+            "appVersion": str(time.time()),  # pages reload themselves when this changes
             "hasGameRegion": bool(cfg.get("gameRegion")),
             "taken": [],  # guesses other players made this round: [{text, player}]
             "rejected": [],  # normalized answers the checker rejected for this prompt
@@ -197,6 +199,7 @@ class TriviaApp:
         positions = {}
         timesGuessed = self.tracker.guessCounts(prompt)  # learned from other players: common answers sink
         repeatRate = self.tracker.repeatRateByRarity()  # learned from the game: bands that keep getting "already said"
+        bandPoints = self.tracker.pointsByRarityBand()  # learned from tiers: what each rarity band actually scores
         rules = parseConstraints(prompt)
         learnedRules, _ = self.tracker.latestInsights()
         pendingJev = []
@@ -227,8 +230,9 @@ class TriviaApp:
                 # Proven for you here: validity is certain, but it still has to be rare to rank high.
                 pValid = 1.0
                 rarity = item["jev"][1] if item["jev"] else 2.5
-            commonness += 0.5 * repeatRate.get(min(int(rarity), 3), 0)
-            return (rankKey(pValid, rarity, commonness), item["position"])
+            band = min(int(rarity), 3)
+            commonness += 0.5 * repeatRate.get(band, 0)
+            return (rankKey(pValid, rarity, commonness, bandPoints.get(band)), item["position"])
 
         def show(newAnswers, model):
             with self.lock:
@@ -468,7 +472,7 @@ class TriviaApp:
                     continue
                 frame = watcher.grab()
                 if watcher.changed(frame):
-                    lines = ocr.recognize(frame)
+                    lines = [line._replace(color=inkColor(frame, line)) for line in ocr.recognize(frame)]
                     promptLines = selectPromptLines(lines, headers, starters, self.cfg["ignoreText"])
                     with self.lock:
                         ownAnswers = list(self.state["answers"])
@@ -636,6 +640,8 @@ class TriviaApp:
 
 DISTILL_SYSTEM = """You study the answer checker of a category word game (Puffer Party). Players take turns typing an answer to a prompt like "Name a fruit"; the checker accepts or rejects each answer, and an answer can't be reused.
 
+How the game reports results: "no echo" (also "keep going") means the checker did NOT recognize the answer; "already said" means it was a repeat; "accepted (TIER)" means it went through with that rarity tier (PLANKTON 10 points, TOO CLEVER 15, SCHOOLER 30, RARE 60, DEEP CUT 85, ONE IN A KRILLION 100).
+
 Write the rules that best predict what the checker accepts and rejects: spelling and variants, plurals, brand or trade names, multi-word or descriptive answers, abbreviations, how strictly it reads the category, and how obscure an answer can be before the checker stops recognizing it.
 
 Rules:
@@ -649,7 +655,7 @@ Rules:
 def distillRules(client, model, verdicts, attempts):
     if not verdicts and not attempts:
         return None
-    lines = ["Verdicts on the player's answers (prompt | answer | verdict | how we know):"]
+    lines = ["Verdicts on the player's answers (prompt | answer | verdict | how we know; 'rejected' from the game means 'no echo' or 'already said'):"]
     lines += [f"{p} | {a} | {v} | {'player marked it' if s == 'me' else 'inferred from the turn'}" for p, a, v, s in verdicts]
     lines += ["", "Other players' attempts (final = the turn moved on after it, so it was most likely accepted; "
               "abandoned = typed in full and then replaced, so it was likely rejected):"]

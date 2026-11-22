@@ -19,5 +19,7 @@ def frequencyRarity(answer):
     if zipf_frequency is None or not answer:
         return None
     zipf = zipf_frequency(answer, "en")
+    if zipf == 0:
+        return None  # never seen: could be very rare, misspelled or made up, so no signal
     zipf -= 1.0 * (len(answer.split()) - 1)
     return max(0.0, min(4.0, (5.5 - zipf) * 0.9))

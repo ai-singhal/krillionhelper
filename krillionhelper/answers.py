@@ -25,6 +25,7 @@ Every answer must still be accepted by the game's checker:
 - a real, specific thing with its own dictionary or Wikipedia entry
 - spelled correctly in its standard English form, in plain ASCII letters without accents
 - clearly and unambiguously in the category, including every rule in the prompt (letter counts, starting or ending letters, and so on). Obscure is good; doubtful is not. If you are not sure an answer fits, leave it out.
+- likely to be in the game's answer list, which is built from dictionaries, Wikipedia lists and encyclopedias: prefer answers with their own Wikipedia article or a place in a standard list over ultra-obscure ones the game may not recognize
 - as short as possible to type: the shortest common name, usually one or two words, with no articles, qualifiers or notes in parentheses
 
 The game auto-corrects small misspellings and treats synonyms and spelling variants as the same answer. So give at most one answer per meaning, and skip answers that are just another name or spelling for a common answer: the game counts them as that common answer, which is usually taken already.
